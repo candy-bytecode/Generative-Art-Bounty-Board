@@ -141,3 +141,111 @@
     (ok true)
   )
 )
+
+;; Public functions
+;; #[allow(unchecked_data)]
+(define-public (create-bounty (theme (string-ascii 100)) (description (string-ascii 200)) (reward uint) (deadline uint) (selection-method (string-ascii 20)))
+  (let
+    (
+      (bounty-id (var-get bounty-count))
+    )
+    (asserts! (> reward u0) err-invalid-amount)
+    (asserts! (> deadline stacks-block-height) err-invalid-amount)
+    (map-set bounties bounty-id
+      {
+        creator: tx-sender,
+        theme: theme,
+        description: description,
+        reward: reward,
+        deadline: deadline,
+        winner-selected: false,
+        selection-method: selection-method,
+        created-at: stacks-block-height
+      }
+    )
+    (map-set bounty-submissions {bounty-id: bounty-id} (list))
+    (var-set bounty-count (+ bounty-id u1))
+    (ok bounty-id)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (submit-artwork (bounty-id uint) (artwork-hash (buff 32)))
+  (let
+    (
+      (bounty-data (unwrap! (map-get? bounties bounty-id) err-not-found))
+      (submission-id (var-get submission-count))
+      (current-submissions (get-bounty-submissions bounty-id))
+    )
+    (asserts! (< stacks-block-height (get deadline bounty-data)) err-bounty-closed)
+    (asserts! (not (get winner-selected bounty-data)) err-bounty-closed)
+    (map-set submissions submission-id
+      {
+        bounty-id: bounty-id,
+        artist: tx-sender,
+        artwork-hash: artwork-hash,
+        is-winner: false,
+        submitted-at: stacks-block-height
+      }
+    )
+    (map-set bounty-submissions {bounty-id: bounty-id}
+      (unwrap-panic (as-max-len? (append current-submissions submission-id) u100))
+    )
+    (var-set submission-count (+ submission-id u1))
+    (ok submission-id)
+  )
+)
+
+(define-public (select-winner-random (bounty-id uint))
+  (let
+    (
+      (bounty-data (unwrap! (map-get? bounties bounty-id) err-not-found))
+      (submission-list (get-bounty-submissions bounty-id))
+      (submission-count-for-bounty (len submission-list))
+    )
+    (asserts! (is-eq tx-sender (get creator bounty-data)) err-unauthorized)
+    (asserts! (>= stacks-block-height (get deadline bounty-data)) err-bounty-closed)
+    (asserts! (not (get winner-selected bounty-data)) err-already-selected)
+    (asserts! (> submission-count-for-bounty u0) err-not-found)
+    (let
+      (
+        (random-index (pseudo-random submission-count-for-bounty))
+        (winner-submission-id (unwrap-panic (element-at submission-list random-index)))
+        (winner-submission (unwrap-panic (map-get? submissions winner-submission-id)))
+        (winner-artist (get artist winner-submission))
+        (current-wins (get-artist-wins winner-artist))
+      )
+      (map-set submissions winner-submission-id
+        (merge winner-submission { is-winner: true })
+      )
+      (map-set bounties bounty-id
+        (merge bounty-data { winner-selected: true })
+      )
+      (map-set artist-wins winner-artist (+ current-wins u1))
+      (ok winner-submission-id)
+    )
+  )
+)
+
+(define-public (select-winner-manual (bounty-id uint) (submission-id uint))
+  (let
+    (
+      (bounty-data (unwrap! (map-get? bounties bounty-id) err-not-found))
+      (submission-data (unwrap! (map-get? submissions submission-id) err-not-found))
+      (winner-artist (get artist submission-data))
+      (current-wins (get-artist-wins winner-artist))
+    )
+    (asserts! (is-eq tx-sender (get creator bounty-data)) err-unauthorized)
+    (asserts! (>= stacks-block-height (get deadline bounty-data)) err-bounty-closed)
+    (asserts! (not (get winner-selected bounty-data)) err-already-selected)
+    (asserts! (is-eq (get bounty-id submission-data) bounty-id) err-not-found)
+    (map-set submissions submission-id
+      (merge submission-data { is-winner: true })
+    )
+    (map-set bounties bounty-id
+      (merge bounty-data { winner-selected: true })
+    )
+    (map-set artist-wins winner-artist (+ current-wins u1))
+    (ok submission-id)
+  )
+)
