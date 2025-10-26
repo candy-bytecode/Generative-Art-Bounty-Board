@@ -249,3 +249,108 @@
     (ok submission-id)
   )
 )
+
+;; #[allow(unchecked_data)]
+(define-public (vote-on-submission (submission-id uint) (rating uint))
+  (let
+    (
+      (submission-data (unwrap! (map-get? submissions submission-id) err-not-found))
+      (bounty-data (unwrap! (map-get? bounties (get bounty-id submission-data)) err-not-found))
+      (current-votes (get-submission-votes submission-id))
+      (artist (get artist submission-data))
+    )
+    (asserts! (<= rating u10) err-invalid-amount)
+    (asserts! (>= rating u1) err-invalid-amount)
+    (asserts! (< stacks-block-height (get deadline bounty-data)) err-bounty-closed)
+    (asserts! (not (is-eq tx-sender artist)) err-unauthorized)
+    (map-set submission-votes {submission-id: submission-id, voter: tx-sender} rating)
+    (map-set submission-total-votes submission-id
+      {
+        vote-count: (+ (get vote-count current-votes) u1),
+        total-rating: (+ (get total-rating current-votes) rating)
+      }
+    )
+    (unwrap-panic (update-artist-reputation artist rating))
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (add-bounty-category (bounty-id uint) (category (string-ascii 50)))
+  (let
+    (
+      (bounty-data (unwrap! (map-get? bounties bounty-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get creator bounty-data)) err-unauthorized)
+    (map-set bounty-categories bounty-id category)
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (add-feedback (submission-id uint) (feedback (string-ascii 200)))
+  (let
+    (
+      (submission-data (unwrap! (map-get? submissions submission-id) err-not-found))
+    )
+    (map-set user-feedback {submission-id: submission-id, reviewer: tx-sender} feedback)
+    (ok true)
+  )
+)
+
+(define-public (sponsor-bounty (bounty-id uint) (amount uint))
+  (let
+    (
+      (bounty-data (unwrap! (map-get? bounties bounty-id) err-not-found))
+      (current-sponsorship (get-bounty-sponsor-amount bounty-id tx-sender))
+    )
+    (asserts! (> amount u0) err-invalid-amount)
+    (asserts! (not (get winner-selected bounty-data)) err-bounty-closed)
+    (map-set bounty-sponsors {bounty-id: bounty-id, sponsor: tx-sender} (+ current-sponsorship amount))
+    (ok true)
+  )
+)
+
+(define-public (cancel-bounty (bounty-id uint))
+  (let
+    (
+      (bounty-data (unwrap! (map-get? bounties bounty-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get creator bounty-data)) err-unauthorized)
+    (asserts! (not (get winner-selected bounty-data)) err-already-selected)
+    (map-set bounties bounty-id
+      (merge bounty-data { winner-selected: true })
+    )
+    (ok true)
+  )
+)
+
+(define-public (extend-bounty-deadline (bounty-id uint) (new-deadline uint))
+  (let
+    (
+      (bounty-data (unwrap! (map-get? bounties bounty-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get creator bounty-data)) err-unauthorized)
+    (asserts! (not (get winner-selected bounty-data)) err-already-selected)
+    (asserts! (> new-deadline (get deadline bounty-data)) err-invalid-amount)
+    (map-set bounties bounty-id
+      (merge bounty-data { deadline: new-deadline })
+    )
+    (ok true)
+  )
+)
+
+(define-public (update-bounty-reward (bounty-id uint) (new-reward uint))
+  (let
+    (
+      (bounty-data (unwrap! (map-get? bounties bounty-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get creator bounty-data)) err-unauthorized)
+    (asserts! (not (get winner-selected bounty-data)) err-already-selected)
+    (asserts! (> new-reward u0) err-invalid-amount)
+    (map-set bounties bounty-id
+      (merge bounty-data { reward: new-reward })
+    )
+    (ok true)
+  )
+)
